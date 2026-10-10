@@ -78,6 +78,7 @@ const App = (() => {
     t.append(
       h('button', { class: 'ib menu-btn', title: 'Menú', onclick: () => document.body.classList.toggle('drawer'), html: icon('menu') }),
       h('div', { class: 'grow' }),
+      h('button', { class: 'ib', title: 'Ayuda', onclick: () => help(), html: icon('help') }),
       h('button', { class: 'ib', title: 'Modo día / noche / automático', onclick: e => cycleTheme(e.currentTarget), html: icon(themeIcon()) }),
       h('button', { class: 'ib', title: 'Novedades', onclick: e => news(e.currentTarget), html: icon('bell') }),
       h('button', { class: 'ib', title: 'Más', onclick: e => topMore(e.currentTarget), html: icon('more') }),
@@ -280,6 +281,43 @@ const App = (() => {
     Paper.T['my:' + t.id] = { id: 'my:' + t.id, name: t.name, cat: 'Mías', mine: true, draw: (c, w, hh) => { const img = Blobs.img(t.blob, () => { Editor.isOpen() ? Editor.repaintAll() : (view === 'gallery' && renderMain()); }); if (img) c.drawImage(img, 0, 0, w, hh); } };
   }
 
+
+  // ---------- cuadro de ayuda ----------
+  const HELP = [
+    { id: 'pen', i: 'pen', t: 'Escribir a mano', d: ['Elige bolígrafo, lápiz o marcador en la barra superior.', 'Toca de nuevo la herramienta para cambiar color y grosor.', 'En el bolígrafo puedes elegir pluma: estilográfica, caligrafía, pincel o punta fina.', 'Con Apple Pencil el dedo desplaza y hace zoom; el lápiz escribe. La presión y la inclinación cambian el trazo.'] },
+    { id: 'perfect', i: 'shapes', t: 'Figuras perfectas', d: ['En bolígrafo o lápiz, abre el menú de figuras (botón con el ícono de figuras).', '«Mantener = figura»: dibuja y deja el lápiz quieto medio segundo.', '«Auto-perfecto»: al soltar convierte círculos, elipses (también inclinadas), rectángulos, rombos, triángulos y polígonos, aunque te pases del borde.', '«Garabato libre»: nunca convierte nada.', 'Selecciona trazos y toca «Perfeccionar» para corregirlos después.'] },
+    { id: 'smart', i: 'sparkle', t: 'Dibujos con IA', d: ['Activa «Auto-perfecto + dibujos (IA)» en el menú de figuras.', 'Dibuja un objeto (árbol, auto, persona, corazón, órgano…). Al terminar aparece «¿Árbol?» con opciones: ilustración a tinta, a color, emoji o «Realista» (con clave de OpenAI).', 'Toca «Mantener» para dejar tu dibujo tal cual.', 'También: selecciona un dibujo con el lazo y toca «Interpretar».', 'Requiere configurar tu IA en Ajustes › Inteligencia artificial.'] },
+    { id: 'shape', i: 'shapes', t: 'Biblioteca de figuras', d: ['Herramienta Figuras › botón con el nombre de la figura para ver las 80+ figuras: básicas, flechas, flujo, 3D, ideas, ciencias, bloques y divisores.', 'Arrastra para dibujarla del tamaño que quieras, o toca para insertarla.', 'Toca dos veces una figura para escribir dentro.', 'Los puntos azules la estiran; en flechas mueves cada extremo y en curvas su curvatura.', 'Las flechas que empiezan o terminan sobre una figura quedan conectadas y la siguen.'] },
+    { id: 'mind', i: 'brain', t: 'Lluvia de ideas y diagramas', d: ['Multimedia (+) › Lluvia de ideas o Diagrama de flujo.', 'Selecciona un nodo y toca «Conectar» para agregar una rama nueva y escribir en ella.', 'Cambia color, relleno, línea y puntas desde la barra de selección.'] },
+    { id: 'text', i: 'text', t: 'Texto y tipos de letra', d: ['Herramienta Texto: toca la página para escribir.', 'Elige entre 29 tipos de letra (también manuscritas y caligráficas), tamaño, negrita, cursiva, subrayado y color.', 'Las notas adhesivas son textos con fondo de color.', 'El botón de teclado agrega texto debajo de lo último escrito.'] },
+    { id: 'lasso', i: 'lasso', t: 'Seleccionar y mover', d: ['Herramienta Seleccionar: rodea en «Forma libre» o arrastra «En caja».', 'Arrastra la selección para moverla; la esquina la escala.', 'Opciones: copiar, cortar, duplicar, color, al frente, convertir a texto, pegatina.'] },
+    { id: 'eraser', i: 'eraser', t: 'Borrar', d: ['Trazo completo, parcial o solo marcador.', 'Toca dos dedos para deshacer.'] },
+    { id: 'tape', i: 'tape', t: 'Cinta para estudiar', d: ['Traza la cinta a mano alzada (o recta) sobre una respuesta.', 'Tócala para revelar u ocultar. «Ocultar todas» para repasar.'] },
+    { id: 'media', i: 'plus-circle', t: 'Imágenes, pegatinas y más', d: ['Multimedia (+): fotos, cámara, escanear, importar PDF, notas adhesivas, figuras, YouTube, plantillas.', 'Pegatinas: paquetes temáticos, viñetas, etiquetas, recientes y favoritas (mantén presionada una para marcarla).', 'Guarda cualquier selección como pegatina propia con el botón «Pegatina».'] },
+    { id: 'zoom', i: 'zoom', t: 'Zoom y ventana de zoom', d: ['Pellizca con dos dedos o usa la herramienta Zoom para acercar un área.', 'Ventana de zoom (menú … o herramienta Zoom): escribe en grande abajo y la tinta cae pequeña en la página; avanza sola al llegar al borde.'] },
+    { id: 'rec', i: 'mic', t: 'Grabar audio', d: ['Toca el micrófono para grabar mientras escribes.', 'Al reproducir, la tinta se ilumina sincronizada; toca un trazo para saltar a ese momento.', 'Transcripción en vivo y resúmenes en Notas inteligentes.'] },
+    { id: 'tpl', i: 'template', t: 'Plantillas, tamaño y orientación', d: ['Más de 90 plantillas: papel, cuadernos, hojas divididas, académico, planificación, creativo, viajes, autocuidado y clínica.', 'Elige tamaño (Carta, Legal, A3–A7…), vertical u horizontal, color del papel y espaciado.', 'En el menú de cada página: girar a vertical u horizontal o cambiar su plantilla.', 'Menú de vista: desplazamiento vertical u horizontal.'] },
+    { id: 'theme', i: 'theme-auto', t: 'Modo día, noche o automático', d: ['Toca el botón de medio círculo arriba para alternar: automático (sigue al sistema), día y noche.'] },
+    { id: 'ai', i: 'sparkle', t: 'Inteligencia artificial', d: ['Ajustes › Inteligencia artificial: usa tus cuentas (Codex, Claude o Gemini en el Mac) o tus claves API.', 'Resúmenes, tarjetas, cuestionarios, chat con tus notas, transcripción y escritura a texto.'] },
+    { id: 'install', i: 'import', t: 'Instalar y sincronizar', d: ['iPad/iPhone: abre la web en Safari › Compartir › Agregar a pantalla de inicio.', 'Mac: la app Trazo guarda copias automáticas en iCloud Drive › Trazo.', 'Pasa notas entre equipos con Exportar › .trazo o copias de seguridad.'] },
+    { id: 'keys', i: 'keyboard', t: 'Atajos de teclado', d: ['P bolígrafo · L lápiz · H marcador · E borrador · T texto · S seleccionar · K cinta · R regla · F figuras · X láser · Espacio navegar.', '⌘Z / ⇧⌘Z deshacer y rehacer · ⌘C ⌘X ⌘V ⌘D · ⌘+ ⌘− ⌘0 zoom · Supr elimina la selección.'] },
+  ];
+  function help(topic) {
+    const list = h('div', { class: 'help-list' }), q = h('input', { class: 'field', placeholder: 'Buscar en la ayuda…', type: 'search' });
+    const L = UI.layer(h('div', { class: 'dlg wide help' }, h('div', { class: 'dlg-head' }, h('span'), h('h3', {}, 'Ayuda'), h('button', { class: 'link b', onclick: () => L.close() }, 'Cerrar')), q, list), { cls: 'center' });
+    const norm = t => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const draw = () => {
+      const w = norm(q.value.trim()); list.innerHTML = '';
+      const items = HELP.filter(x => !w || norm(x.t + ' ' + x.d.join(' ')).includes(w));
+      if (!items.length) list.append(h('p', { class: 'muted' }, 'Sin resultados.'));
+      items.forEach(x => {
+        const card = h('details', { class: 'help-card', open: x.id === topic || !!w ? '' : false }, h('summary', {}, h('span', { class: 'hic', html: icon(x.i) }), x.t), h('ul', {}, ...x.d.map(t => h('li', {}, t))));
+        list.append(card); if (x.id === topic) setTimeout(() => card.scrollIntoView({ block: 'center' }), 60);
+      });
+    };
+    q.addEventListener('input', draw); draw();
+  }
+
   // ---------- papelera ----------
   function trash(c) {
     const list = metas.filter(m => m.deleted).sort((a, b) => b.deleted - a.deleted);
@@ -326,7 +364,7 @@ const App = (() => {
       '-',
       { t: 'Copia de seguridad', i: 'cloud', fn: () => settings('sync') },
       { t: 'Ajustes', i: 'gear', fn: () => settings() },
-      { t: 'Ayuda y atajos', i: 'help', fn: () => settings('help') },
+      { t: 'Ayuda y atajos', i: 'help', fn: () => help() },
     ], { align: 'right' });
   }
   function news(btn) {
@@ -490,7 +528,7 @@ const App = (() => {
           group('Texto', row('Fuente', select('textFont', [['system', 'Sistema'], ['serif', 'Serif'], ['round', 'Redondeada'], ['mono', 'Monoespaciada'], ['hand', 'Manuscrita']])),
             row('Tamaño', h('input', { class: 'field xs', type: 'number', min: 10, max: 72, value: S.textSize, onchange: e => { S.textSize = +e.target.value || 18; S.save(); } }))),
           group('Escritura a mano y dibujo', row('Suavizado del trazo', h('input', { type: 'range', class: 'rng', min: 0, max: 1, step: 0.05, value: S.smoothing, onchange: e => { S.smoothing = +e.target.value; S.save(); } })),
-            row('Sensibilidad a la presión', toggle('pressure')), row('Figuras perfectas', select('shapeMode', [['off', 'Garabato libre'], ['hold', 'Al mantener el trazo'], ['auto', 'Automático al soltar']])), row('Página nueva automática al llegar al final', toggle('autoPage'))),
+            row('Sensibilidad a la presión', toggle('pressure')), row('Figuras perfectas', select('shapeMode', [['off', 'Garabato libre'], ['hold', 'Al mantener el trazo'], ['auto', 'Automático al soltar'], ['smart', 'Automático + dibujos con IA']])), row('Página nueva automática al llegar al final', toggle('autoPage'))),
           group('Multimedia', row('Esquinas de imágenes', select('mediaCorners', [['square', 'Puntiagudas'], ['round', 'Redondeadas']]))));
       } else if (k === 'pencil') {
         P(group('Apple Pencil', row('Escribir con', select('pencilOnly', [['auto', 'Automático (al detectar el Pencil)'], ['on', 'Solo Apple Pencil'], ['off', 'Pencil y dedo']]), 'Con «Solo Apple Pencil», el dedo desplaza, hace zoom y toca cintas'),
@@ -508,6 +546,7 @@ const App = (() => {
       } else if (k === 'about') {
         P(h('div', { class: 'plan' }, h('div', { class: 'logo', html: icon('logo') }), h('h2', {}, 'Trazo'), h('p', {}, 'Notas a mano, PDF y audio para iPad, iPhone y Mac.'), h('p', { class: 'muted' }, 'Hecho para el Dr. Marcelo Lam · 2026'), h('p', { class: 'muted small' }, 'Usa pdf.js (Mozilla), pdf-lib y JSZip, de código abierto.')));
       } else if (k === 'help') {
+        L.close(); help(); return;
         const keys = [['P', 'Bolígrafo'], ['L', 'Lápiz'], ['H', 'Marcador'], ['E', 'Borrador'], ['T', 'Texto'], ['S', 'Seleccionar'], ['K', 'Cinta'], ['R', 'Regla'], ['F', 'Figuras'], ['X', 'Láser'], ['Espacio', 'Navegar'], ['⌘Z / ⇧⌘Z', 'Deshacer / rehacer'], ['⌘C ⌘X ⌘V ⌘D', 'Copiar, cortar, pegar, duplicar'], ['⌘+ / ⌘− / ⌘0', 'Zoom'], ['Supr', 'Eliminar selección']];
         P(group('Atajos de teclado', ...keys.map(([k2, v]) => row(v, h('kbd', {}, k2)))),
           group('Cómo hacer…',
@@ -577,7 +616,7 @@ const App = (() => {
     if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  return { start, go, render, refresh, newNote, createNote, openNote, importPick, templatePicker, savePageAsTemplate, settings, noteInfo, nativeOpen, get view() { return view; } };
+  return { help, start, go, render, refresh, newNote, createNote, openNote, importPick, templatePicker, savePageAsTemplate, settings, noteInfo, nativeOpen, get view() { return view; } };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.start());

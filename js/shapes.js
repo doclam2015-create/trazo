@@ -437,20 +437,53 @@ const Shapes = (() => {
     if (dmax > eps) { const l = rdp(pts.slice(0, idx + 1), eps), r = rdp(pts.slice(idx), eps); return l.slice(0, -1).concat(r); }
     return [a, b];
   }
-  // strict: modo automático (solo si el ajuste es muy bueno); si no, al mantener el lápiz
+  // remuestrea a distancia uniforme (las estadísticas no dependen de la velocidad del trazo)
+  function resample(pts, step) {
+    const out = [pts[0]]; let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      let [ax, ay] = pts[i - 1]; const [bx, by] = pts[i]; let d = Math.hypot(bx - ax, by - ay);
+      while (acc + d >= step && d > 0) { const t = (step - acc) / d; ax += (bx - ax) * t; ay += (by - ay) * t; out.push([ax, ay]); d = Math.hypot(bx - ax, by - ay); acc = 0; }
+      acc += d;
+    }
+    return out;
+  }
+  // ejes principales (para figuras inclinadas)
+  function pca(pts) {
+    let mx = 0, my = 0; pts.forEach(([x, y]) => { mx += x; my += y; }); mx /= pts.length; my /= pts.length;
+    let a = 0, b = 0, c = 0; pts.forEach(([x, y]) => { const dx = x - mx, dy = y - my; a += dx * dx; b += dx * dy; c += dy * dy; });
+    const th = 0.5 * Math.atan2(2 * b, a - c), co = Math.cos(th), si = Math.sin(th);
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    pts.forEach(([x, y]) => { const u = (x - mx) * co + (y - my) * si, v = -(x - mx) * si + (y - my) * co; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); });
+    const cu = (u0 + u1) / 2, cv = (v0 + v1) / 2;
+    return { th, co, si, cx: mx + cu * co - cv * si, cy: my + cu * si + cv * co, a: (u1 - u0) / 2, b: (v1 - v0) / 2 };
+  }
+  // cierra el trazo aunque se pase del punto de inicio: busca dónde se cruzan el principio y el final
+  function closeLoop(pts, diag) {
+    const n = pts.length, k = Math.floor(n * 0.4);
+    let best = Infinity, bi = 0, bj = n - 1;
+    for (let i = 0; i < k; i++) for (let j = n - 1; j >= n - k; j--) { const d = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]); if (d < best) { best = d; bi = i; bj = j; } }
+    return best < diag * 0.22 && bj - bi > n * 0.5 ? pts.slice(bi, bj + 1) : null;
+  }
+  const polyFrom = (v, st) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; v.forEach(([a, b]) => { x0 = Math.min(x0, a); y0 = Math.min(y0, b); x1 = Math.max(x1, a); y1 = Math.max(y1, b); });
+    const bw = x1 - x0 || 1, bh = y1 - y0 || 1;
+    return Object.assign(make('rect', x0, y0, x1, y1, st), { sh: 'poly', x: x0, y: y0, w: bw, h: bh, pts: v.map(([a, b]) => [(a - x0) / bw, (b - y0) / bh]) });
+  };
+  // strict: modo automático; si no, al mantener el lápiz (más permisivo)
   function fromStroke(s, strict) {
-    const p = s.p, n = p.length / 3; if (n < 6 || s.k === 'marker') return null;
-    const pts = []; let len = 0;
-    for (let i = 0; i < n; i++) { pts.push([p[i * 3], p[i * 3 + 1]]); if (i) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); }
+    const p = s.p, n0 = p.length / 3; if (n0 < 6 || s.k === 'marker') return null;
+    let raw = []; let len = 0;
+    for (let i = 0; i < n0; i++) { raw.push([p[i * 3], p[i * 3 + 1]]); if (i) len += Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]); }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    pts.forEach(([a, b]) => { x0 = Math.min(x0, a); y0 = Math.min(y0, b); x1 = Math.max(x1, a); y1 = Math.max(y1, b); });
-    const bw = x1 - x0, bh = y1 - y0, diag = Math.hypot(bw, bh); if (diag < (strict ? 40 : 14)) return null;
-    const first = pts[0], last = pts[n - 1], chord = Math.hypot(last[0] - first[0], last[1] - first[1]);
+    raw.forEach(([a, b]) => { x0 = Math.min(x0, a); y0 = Math.min(y0, b); x1 = Math.max(x1, a); y1 = Math.max(y1, b); });
+    const diag = Math.hypot(x1 - x0, y1 - y0); if (diag < (strict ? 36 : 14)) return null;
+    const first = raw[0], last = raw[n0 - 1], chord = Math.hypot(last[0] - first[0], last[1] - first[1]);
     const st = { c: s.c, lw: s.w };
-    if (chord / len > (strict ? 0.975 : 0.92)) return make('line', first[0], first[1], last[0], last[1], st);
-    if (chord > diag * (strict ? 0.16 : 0.3)) {
+    if (chord / len > (strict ? 0.95 : 0.92)) return make('line', first[0], first[1], last[0], last[1], st);
+    const pts = resample(raw, Math.max(2, diag / 90));
+    const loop = closeLoop(pts, diag) || (chord < diag * 0.3 ? pts : null);
+    if (!loop) {
       if (strict) return null;
-      // flecha dibujada de un trazo: línea larga + punta corta en V
       const simp = rdp(pts, diag * 0.06);
       if (simp.length === 4) {
         const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]), [A, B, C, D] = simp;
@@ -458,36 +491,59 @@ const Shapes = (() => {
       }
       return null;
     }
-    // cerrado: compara polígono contra elipse
-    const cx = x0 + bw / 2, cy = y0 + bh / 2, rx = Math.max(1, bw / 2), ry = Math.max(1, bh / 2);
-    let ell = 0; pts.forEach(([a, b]) => { ell += Math.abs(Math.hypot((a - cx) / rx, (b - cy) / ry) - 1); }); ell = ell / n * (rx + ry) / 2 / diag;
-    let v = rdp(pts, diag * 0.065); if (v.length > 2 && Math.hypot(v[0][0] - v[v.length - 1][0], v[0][1] - v[v.length - 1][1]) < diag * 0.22) v.pop();
-    // fusiona vértices muy cercanos
-    v = v.filter((q, i) => !i || Math.hypot(q[0] - v[i - 1][0], q[1] - v[i - 1][1]) > diag * 0.08);
+    const n = loop.length;
+    // elipse (también inclinada)
+    const E = pca(loop), ea = Math.max(1, E.a), eb = Math.max(1, E.b);
+    let ell = 0; loop.forEach(([x, y]) => { const u = (x - E.cx) * E.co + (y - E.cy) * E.si, v = -(x - E.cx) * E.si + (y - E.cy) * E.co; ell += Math.abs(Math.hypot(u / ea, v / eb) - 1); });
+    ell = ell / n * (ea + eb) / 2 / diag;
+    // polígono
+    let v = rdp(loop, diag * 0.075);
+    if (v.length > 2 && Math.hypot(v[0][0] - v[v.length - 1][0], v[0][1] - v[v.length - 1][1]) < diag * 0.25) v.pop();
+    v = v.filter((q, i) => !i || Math.hypot(q[0] - v[i - 1][0], q[1] - v[i - 1][1]) > diag * 0.09);
+    // quita vértices casi alineados (p. ej. donde empezó o terminó el trazo, a mitad de un lado)
+    for (let changed = true; changed && v.length > 3;) {
+      changed = false;
+      for (let i = 0; i < v.length; i++) {
+        const a = v[(i - 1 + v.length) % v.length], b = v[i], c = v[(i + 1) % v.length];
+        const t = Math.abs(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]));
+        if (Math.min(t, 2 * Math.PI - t) < 0.38) { v.splice(i, 1); changed = true; break; }
+      }
+    }
     let pe = Infinity;
-    if (v.length >= 3) { pe = 0; pts.forEach(([a, b]) => { let m = Infinity; for (let i = 0; i < v.length; i++) { const q = v[i], r = v[(i + 1) % v.length]; m = Math.min(m, Ink.segDist(a, b, q[0], q[1], r[0], r[1])); } pe += m; }); pe = pe / n / diag; }
-    const lim = strict ? 0.035 : 0.08;
-    if (v.length >= 3 && v.length <= 8 && pe < ell && pe < lim) {
-      const box = (sh, extra) => Object.assign(make(sh, x0, y0, x1, y1, st), extra || {});
+    if (v.length >= 3) { pe = 0; loop.forEach(([a, b]) => { let m = Infinity; for (let i = 0; i < v.length; i++) { const q = v[i], r = v[(i + 1) % v.length]; m = Math.min(m, Ink.segDist(a, b, q[0], q[1], r[0], r[1])); } pe += m; }); pe = pe / n / diag; }
+    const lim = strict ? 0.06 : 0.09, elim = strict ? 0.09 : 0.14;
+    const axisAligned = th => Math.abs(Math.sin(2 * th)) < 0.22;
+    if (v.length >= 3 && v.length <= 8 && pe < lim && pe < ell * (v.length <= 4 ? 0.9 : 0.55) && !(v.length >= 7 && ell < elim)) {
+      const bw = x1 - x0, bh = y1 - y0, cx = x0 + bw / 2, cy = y0 + bh / 2;
+      const box = sh => make(sh, ...(() => { let X0 = Infinity, Y0 = Infinity, X1 = -Infinity, Y1 = -Infinity; v.forEach(([a, b]) => { X0 = Math.min(X0, a); Y0 = Math.min(Y0, b); X1 = Math.max(X1, a); Y1 = Math.max(Y1, b); }); return [X0, Y0, X1, Y1]; })(), st);
       if (v.length === 4) {
-        const ang = Math.atan2(v[1][1] - v[0][1], v[1][0] - v[0][0]), s2 = Math.abs(Math.sin(ang * 2));
-        if (s2 < 0.3) return box(Math.abs(bw - bh) / Math.max(bw, bh) < 0.08 ? 'square' : 'rect');
         const mids = [[cx, y0], [x1, cy], [cx, y1], [x0, cy]];
-        if (v.every(q => mids.some(m => Math.hypot(q[0] - m[0], q[1] - m[1]) < diag * 0.12))) return box('diamond');
+        if (v.every(q => mids.some(m => Math.hypot(q[0] - m[0], q[1] - m[1]) < diag * 0.15))) return make('diamond', x0, y0, x1, y1, st);
+        const ang = i => { const a = v[(i + 3) % 4], b = v[i], c = v[(i + 1) % 4], u = [a[0] - b[0], a[1] - b[1]], w = [c[0] - b[0], c[1] - b[1]]; return Math.abs((u[0] * w[0] + u[1] * w[1]) / (Math.hypot(...u) * Math.hypot(...w) || 1)); };
+        if ([0, 1, 2, 3].every(i => ang(i) < 0.33)) {
+          // rectángulo: recto si está casi alineado, si no, rectángulo inclinado perfecto
+          const R = pca(v.concat(loop));
+          if (axisAligned(R.th)) { const g = box('rect'); return Math.abs(g.w - g.h) / Math.max(g.w, g.h) < 0.1 ? Object.assign(g, { sh: 'square' }) : g; }
+          const c4 = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([su, sv]) => [R.cx + su * R.a * R.co - sv * R.b * R.si, R.cy + su * R.a * R.si + sv * R.b * R.co]);
+          return polyFrom(c4, st);
+        }
       }
       if (v.length === 3) {
         const top = v.reduce((a, b) => b[1] < a[1] ? b : a);
-        if (Math.abs(top[0] - cx) < bw * 0.12 && v.filter(q => q !== top).every(q => Math.abs(q[1] - y1) < bh * 0.12)) return box('tri');
+        if (Math.abs(top[0] - cx) < bw * 0.15 && v.filter(q => q !== top).every(q => Math.abs(q[1] - y1) < bh * 0.15)) return box('tri');
       }
-      if (v.length === 5 || v.length === 6 || v.length === 8) {
-        const rs = v.map(q => Math.hypot((q[0] - cx) / rx, (q[1] - cy) / ry)), mean = rs.reduce((a, b) => a + b) / rs.length;
-        if (rs.every(r => Math.abs(r - mean) < 0.15)) return box({ 5: 'pent', 6: 'hex', 8: 'oct' }[v.length]);
+      if (v.length >= 5) {
+        const rs = v.map(q => Math.hypot((q[0] - cx) / (bw / 2 || 1), (q[1] - cy) / (bh / 2 || 1))), mean = rs.reduce((a, b) => a + b) / rs.length;
+        if (rs.every(r => Math.abs(r - mean) < 0.18) && { 5: 1, 6: 1, 8: 1 }[v.length]) return box({ 5: 'pent', 6: 'hex', 8: 'oct' }[v.length]);
       }
-      return box('poly', { pts: v.map(([a, b]) => [(a - x0) / (bw || 1), (b - y0) / (bh || 1)]) });
+      return polyFrom(v, st);
     }
-    if (ell < (strict ? 0.045 : 0.12)) {
-      if (Math.abs(rx - ry) / Math.max(rx, ry) < 0.12) { const r = (rx + ry) / 2; return make('circle', cx - r, cy - r, cx + r, cy + r, st); }
-      return make('ellipse', x0, y0, x1, y1, st);
+    if (ell < elim) {
+      if (Math.abs(ea - eb) / Math.max(ea, eb) < 0.13) { const r = (ea + eb) / 2; return make('circle', E.cx - r, E.cy - r, E.cx + r, E.cy + r, st); }
+      if (axisAligned(E.th)) { const A = Math.abs(E.co) > 0.7 ? ea : eb, B = Math.abs(E.co) > 0.7 ? eb : ea; return make('ellipse', E.cx - A, E.cy - B, E.cx + A, E.cy + B, st); }
+      // elipse inclinada: contorno suave de 72 puntos
+      const o = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2, u = Math.cos(t) * ea, w = Math.sin(t) * eb; o.push([E.cx + u * E.co - w * E.si, E.cy + u * E.si + w * E.co]); }
+      return polyFrom(o, st);
     }
     return null;
   }

@@ -20,7 +20,7 @@ const DEFAULT_TOOLS = [
 const TOOL_ICON = { pen: 'pen', pencil: 'pencil', marker: 'marker', eraser: 'eraser', text: 'text', lasso: 'lasso', media: 'plus-circle', hand: 'hand', zoom: 'zoom', tape: 'tape', ruler: 'ruler', shape: 'shapes', laser: 'laser', rec: 'mic' };
 const DUPLICABLE = ['pen', 'pencil', 'marker', 'eraser', 'lasso', 'shape'];
 const PEN_STYLES = [['ball', 'Bolígrafo', 'Trazo con presión natural'], ['fountain', 'Pluma estilográfica', 'Grosor según la dirección'], ['calli', 'Caligrafía', 'Punta biselada a 45°'], ['brush', 'Pincel', 'Muy sensible a la presión'], ['fine', 'Punta fina', 'Grosor constante, ideal para diagramas']];
-const SHAPE_MODES = [['off', 'Garabato libre', 'Nunca convierte tus trazos'], ['hold', 'Mantener = figura', 'Dibuja y deja el lápiz quieto medio segundo'], ['auto', 'Auto-perfecto', 'Convierte al soltar si reconoce la figura']];
+const SHAPE_MODES = [['off', 'Garabato libre', 'Nunca convierte tus trazos'], ['hold', 'Mantener = figura', 'Dibuja y deja el lápiz quieto medio segundo'], ['auto', 'Auto-perfecto', 'Convierte al soltar si reconoce la figura'], ['smart', 'Auto-perfecto + dibujos (IA)', 'También reconoce objetos: árbol, auto, persona…']];
 const shapeMode = () => Settings.shapeMode || (Settings.shapes === false ? 'off' : 'hold');
 const SIZES_OF = { pen: [1.2, 2.4, 4, 7], pencil: [1.5, 2.2, 3.5, 6], marker: [10, 18, 28, 40], eraser: [6, 14, 28, 56], shape: [1.5, 2.4, 4, 7] };
 
@@ -90,6 +90,7 @@ const Editor = (() => {
       h('div', { class: 'ed-right' },
         h('button', { class: 'ib', id: 'bUndo', title: 'Deshacer', onclick: undo, html: icon('undo') }),
         h('button', { class: 'ib', id: 'bRedo', title: 'Rehacer', onclick: redo, html: icon('redo') }),
+        h('button', { class: 'ib', title: 'Ayuda', onclick: () => App.help({ pen: 'pen', pencil: 'pen', marker: 'pen', shape: 'shape', text: 'text', lasso: 'lasso', eraser: 'eraser', tape: 'tape', media: 'media', zoom: 'zoom', rec: 'rec' }[tool && tool.k] || (shapeMode() === 'smart' ? 'smart' : '')), html: icon('help') }),
         h('button', { class: 'ib', title: 'Modo día / noche / automático', onclick: e => cycleTheme(e.currentTarget), html: icon(themeIcon()) }),
         h('button', { class: 'ib', title: 'Más', onclick: e => moreMenu(e.currentTarget), html: icon('more') }),
         h('button', { class: 'ib', title: 'Escribir con teclado', onclick: typeMode, html: icon('keyboard') }),
@@ -523,6 +524,7 @@ const Editor = (() => {
     // tocar una cinta la revela u oculta (con cualquier herramienta de escritura, al levantar sin mover)
     const tapeHit = page.items.find(it => it.t === 'tp' && Items.hit(it, x, y, 2));
     if (k === 'pen' || k === 'pencil' || k === 'marker') {
+      smartHold();
       const pr = pressureOf(e);
       const s = { t: 's', id: uid(), k, c: tool.c, w: tool.w, p: [x, y, pr] };
       if (k === 'marker' && tool.straight) s.flat = 1;
@@ -628,7 +630,7 @@ const Editor = (() => {
       if (g) {
         if (rec) g.r = [rec.id, Date.now() - rec.t0 - rec.paused];
         if (Shapes.isLine(g)) { const A = Shapes.anchorAt(page.items, g.x1, g.y1), B = Shapes.anchorAt(page.items, g.x2, g.y2); if (A) g.a = A.id; if (B && B !== A) g.b = B.id; if (g.a || g.b) Shapes.attach(page.items.concat(g), new Set([g])); }
-        snap(a.pi); page.items.push(g); paintInk(a.pi); markDirty(); updateEmpty(); thumbsDirty(a.pi); return;
+        snap(a.pi); page.items.push(g); paintInk(a.pi); markDirty(); updateEmpty(); thumbsDirty(a.pi); smartQueue(a.pi, g); return;
       }
       if (!a.shaped && !a.straight && s.p.length > 9) s.p = Ink.smooth(s.p, Settings.smoothing);
       if (rec) s.r = [rec.id, Date.now() - rec.t0 - rec.paused];
@@ -637,7 +639,7 @@ const Editor = (() => {
       // página nueva automática al escribir al final
       const b = Ink.bbox(s);
       if (Settings.autoPage && a.pi === note.pages.length - 1 && b.y + b.h > page.h - 90 && !page.bg) { note.pages.push(newPage(page)); layoutPages(); toast('Página nueva agregada'); }
-      thumbsDirty(a.pi);
+      thumbsDirty(a.pi); smartQueue(a.pi, s);
       return;
     }
     if (a.kind === 'shape') {
@@ -723,6 +725,94 @@ const Editor = (() => {
     }, 550);
   }
   const tapeItem = a => tool.free === false ? { t: 'tp', id: uid(), x1: a.x0, y1: a.y0, x2: a.x, y2: a.y, w: 30, c: tool.c, hid: true } : { t: 'tp', id: uid(), p: a.pts.length > 9 ? Ink.smooth(a.pts, 0.6) : a.pts.slice(), w: tool.tw || 28, c: tool.c, hid: true };
+  // ---------- auto-dibujo: la IA reconoce bocetos (árbol, auto, persona…) y propone una versión limpia ----------
+  let smart = null, smartBar = null;
+  function smartQueue(pi, it) {
+    if (shapeMode() !== 'smart' || (it.t === 's' && it.k === 'marker') || !AI.available()) return;
+    const b = Items.bbox(it);
+    if (smart && (smart.pi !== pi || !near(smart.box, b))) smart = null;
+    if (!smart) smart = { pi, ids: [], box: b };
+    smart.ids.push(it.id); const o = smart.box, x0 = Math.min(o.x, b.x), y0 = Math.min(o.y, b.y); smart.box = { x: x0, y: y0, w: Math.max(o.x + o.w, b.x + b.w) - x0, h: Math.max(o.y + o.h, b.y + b.h) - y0 };
+    clearTimeout(smart.t); const cur = smart;
+    smart.t = setTimeout(() => { if (smart === cur) { smart = null; smartRun(cur.pi, cur.ids); } }, cur.ids.length > 1 ? 1700 : 900);
+  }
+  const near = (a, b) => b.x < a.x + a.w + 140 && b.x + b.w > a.x - 140 && b.y < a.y + a.h + 140 && b.y + b.h > a.y - 140;
+  function smartHold() { if (smart) clearTimeout(smart.t); closeSmartBar(); }
+  function closeSmartBar() { if (smartBar) { smartBar.remove(); smartBar = null; } }
+  function cleanSVG(txt, color) {
+    const m = String(txt || '').match(/<svg[\s\S]*<\/svg>/i); if (!m) return null;
+    const doc = new DOMParser().parseFromString(m[0], 'image/svg+xml'), svg = doc.documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return null;
+    const ok = new Set(['svg', 'g', 'path', 'circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon', 'defs', 'lineargradient', 'radialgradient', 'stop']);
+    [...svg.querySelectorAll('*')].forEach(n => { if (!ok.has(n.nodeName.toLowerCase())) n.remove(); });
+    [svg, ...svg.querySelectorAll('*')].forEach(n => [...n.attributes].forEach(a => { const k = a.name.toLowerCase(); if (k.startsWith('on') || k.includes('href') || k === 'style') n.removeAttribute(a.name); else if (/^(stroke|fill)$/.test(k) && /^(#000(000)?|black|currentcolor)$/i.test(a.value.trim())) n.setAttribute(a.name, color); }));
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    return new XMLSerializer().serializeToString(svg);
+  }
+  async function svgToBlob(svg, w, h) {
+    const k = Math.min(4, 1600 / Math.max(w, h)), img = await UI.loadImage('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+    const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return UI.canvasBlob(c, 'image/png');
+  }
+  async function smartRun(pi, ids, manual) {
+    const page = note.pages[pi], items = page.items.filter(i => ids.includes(i.id) && (i.t === 's' || i.t === 'g'));
+    if (!items.length) return;
+    // un solo trazo: primero intenta la figura geométrica perfecta
+    if (!manual && items.length === 1 && items[0].t === 's') {
+      const g = Shapes.fromStroke(items[0], true);
+      if (g) { g.r = items[0].r; snap(pi); page.items[page.items.indexOf(items[0])] = g; paintInk(pi); markDirty(); return; }
+    }
+    const b0 = selBox(items), b = { x: b0.x + 4, y: b0.y + 4, w: b0.w - 8, h: b0.h - 8 };
+    // descarta escritura en renglón y trazos muy pequeños
+    if (!manual && (b.w < 50 || b.h < 50 || (b.w / b.h > 4 && b.h < 70))) return;
+    const k = 512 / Math.max(b.w, b.h), c = document.createElement('canvas'); c.width = Math.max(64, Math.round(b.w * k)); c.height = Math.max(64, Math.round(b.h * k));
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.setTransform(k, 0, 0, k, -b.x * k, -b.y * k);
+    Items.drawAll(x, items.map(i => Object.assign({}, i, { c: '#000', fl: i.fl ? '#888' : '' })));
+    const W = 400, H = Math.round(400 * b.h / b.w), color = items[0].c || '#1C1C1E';
+    const pill = h('div', { class: 'smartbar busy' }, h('span', { html: icon('sparkle') }), 'Interpretando dibujo…');
+    if (manual) { root.append(pill); posSmart(pill, pi, b); }
+    let r;
+    try {
+      r = await AI.ask(`La imagen es un boceto a mano alzada hecho en una nota. Si representa algo reconocible (objeto, animal, persona, vehículo, planta, edificio, comida, órgano o instrumento médico, símbolo…) y NO es texto manuscrito ni un garabato sin sentido, identifícalo y redibújalo como lo haría un ilustrador profesional: anatomía y proporciones reales, formas naturales, detalles y textura (corteza, hojas, pliegues, reflejos, ruedas con llantas, rasgos faciales, etc.). Nada de estilo infantil ni figuras de palitos.
+Responde JSON: {"obj": "nombre corto en español" o null, "emoji": ["hasta 3 emojis parecidos"], "linea": "<svg…>", "color": "<svg…>"}.
+- "linea": ilustración a tinta detallada (estilo grabado o lámina de libro): contornos con grosores variados (1–4), sombreado con tramado o trazos paralelos, muchos detalles; stroke="#000", fill="none" salvo zonas de sombra sólidas en "#000".
+- "color": la misma ilustración a todo color, realista, con degradados (linearGradient/radialGradient en <defs>), luces y sombras, colores naturales.
+Ambos SVG: viewBox="0 0 ${W} ${H}", conserva la composición, orientación, tamaño relativo y encuadre del boceto; usa solo g, path, circle, ellipse, rect, line, polyline, polygon, defs, linearGradient, radialGradient y stop; atributos de presentación (fill, stroke, stroke-width, opacity, stop-color, offset), sin atributo style, sin texto, sin imágenes, sin scripts. Usa entre 40 y 250 elementos.`, { image: c.toDataURL('image/png'), json: true });
+    } catch (e) { pill.remove(); if (manual) toast('No se pudo interpretar: ' + e.message); return; }
+    pill.remove();
+    if (!r || !r.obj) { if (manual) toast('No reconocí un objeto en el dibujo'); return; }
+    if (ids.some(id => !page.items.some(i => i.id === id))) return; // el dibujo cambió mientras tanto
+    const opts = [];
+    for (const [k, col, t] of [['linea', color, 'Ilustración a tinta'], ['color', null, 'Ilustración a color'], ['svg', color, 'Versión limpia']]) {
+      const svg = r[k] && cleanSVG(r[k], col || '#000'); if (!svg) continue;
+      try { const blob = await svgToBlob(svg, b.w, b.h); opts.push({ blob, url: URL.createObjectURL(blob), t }); } catch (e) {}
+    }
+    for (const em of (r.emoji || []).slice(0, 2)) { const cv = Stickers.render({ k: 'e', v: em }, 240), blob = await UI.canvasBlob(cv, 'image/png'); opts.push({ blob, url: URL.createObjectURL(blob), emoji: true }); }
+    if (!opts.length) return;
+    closeSmartBar();
+    const replace = async o => {
+      closeSmartBar(); const id = await Blobs.put(o.blob);
+      let w = b.w, hh = b.h; if (o.emoji) { w = hh = Math.max(b.w, b.h); }
+      snap(pi); page.items = page.items.filter(i => !ids.includes(i.id));
+      page.items.push({ t: 'i', id: uid(), b: id, x: b.x + (b.w - w) / 2, y: b.y + (b.h - hh) / 2, w, h: hh }); paintInk(pi); markDirty(); thumbsDirty(pi);
+    };
+    smartBar = h('div', { class: 'smartbar' }, h('span', { class: 'sq' }, '¿' + r.obj.charAt(0).toUpperCase() + r.obj.slice(1) + '?'),
+      ...opts.map(o => h('button', { class: 'sopt' + (o.emoji ? ' emo' : ''), title: o.t || 'Usar emoji', onclick: () => replace(o) }, h('img', { src: o.url }))),
+      AI.keys().openai ? h('button', { class: 'sopt real', title: 'Ilustración realista (OpenAI)', onclick: async e => {
+        const btn = e.currentTarget; btn.classList.add('wait'); btn.textContent = '…';
+        try { const blob = await AI.sketchToImage(c.toDataURL('image/png'), r.obj); replace({ blob }); }
+        catch (x) { btn.classList.remove('wait'); btn.textContent = 'Realista'; toast(x.message); }
+      } }, 'Realista') : null,
+      h('button', { class: 'skeep', onclick: closeSmartBar }, 'Mantener'));
+    root.append(smartBar); posSmart(smartBar, pi, b);
+    clearTimeout(closeSmartBar.t); closeSmartBar.t = setTimeout(() => { if (smartBar && !smartBar.matches(':hover')) closeSmartBar(); }, 15000);
+  }
+  function posSmart(el, pi, b) {
+    const r = pageEls[pi].getBoundingClientRect(), w = el.offsetWidth;
+    let x = r.left + (b.x + b.w / 2) * z - w / 2, y = r.top + b.y * z - el.offsetHeight - 10;
+    if (y < 120) y = r.top + (b.y + b.h) * z + 10;
+    el.style.left = Math.max(8, Math.min(innerWidth - w - 8, x)) + 'px'; el.style.top = Math.max(70, Math.min(innerHeight - 70, y)) + 'px';
+  }
   const shapeStyle = () => ({ c: tool.c, lw: tool.w, fl: tool.fill ? tool.c : '', fo: tool.fill === 'soft' ? 0.18 : 1, ds: tool.ds });
   const shapeItem = a => Shapes.make(tool.s, a.x0, a.y0, a.x, a.y, shapeStyle());
   let shapeTap = null;
@@ -950,6 +1040,7 @@ const Editor = (() => {
       sel.items.some(i => i.t === 's') ? btn('Perfeccionar', perfectSel, 'shapes') : null,
       btn('Pegatina', stickerSel, 'sticker'),
       one && one.t === 'x' ? btn('Editar', () => { const s = sel; clearSel(); editText(s.pi, one); }, 'text') : null,
+      sel.items.some(i => i.t === 's') && Settings.aiKey ? btn('Interpretar', () => { const s = sel; clearSel(); smartRun(s.pi, s.items.map(i => i.id), true); }, 'sparkle') : null,
       sel.items.some(i => i.t === 's') && Settings.aiKey ? btn('A texto', () => Smart.inkToText(note, sel.pi, sel.box), 'sparkle') : null,
       btn('Al frente', () => { snap(sel.pi); const p = note.pages[sel.pi]; p.items = p.items.filter(i => !sel.items.includes(i)).concat(sel.items); paintInk(sel.pi); markDirty(); }, 'front')].filter(Boolean));
     root.append(st); sel.tools = st; posSelTools();

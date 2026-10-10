@@ -312,6 +312,18 @@ textarea.tx.lbl{text-align:center;background:rgba(255,255,255,.85);border-radius
 .seg{display:inline-flex;background:var(--hover);border-radius:10px;padding:3px}
 .seg button{display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;font-size:13px;color:var(--ink2)} .seg button.on{background:var(--panel);color:var(--accent);box-shadow:var(--shadow-s)}
 .or{display:inline-block;border:1.8px solid currentColor;border-radius:2px} .or.portrait{width:10px;height:14px} .or.landscape{width:15px;height:10px}
+.smartbar{position:fixed;z-index:22;display:flex;align-items:center;gap:6px;background:var(--panel);border-radius:16px;padding:6px 8px;box-shadow:var(--shadow),0 0 0 1px var(--line);animation:pop .16s ease-out}
+.smartbar.busy{font-size:13px;color:var(--ink2);padding:8px 14px;gap:8px} .smartbar.busy .ic{width:16px;height:16px;color:var(--accent);animation:spin 1.4s linear infinite}
+.smartbar .sq{font-size:13px;font-weight:600;padding:0 6px;white-space:nowrap}
+.smartbar .sopt{width:58px;height:58px;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px var(--line);display:grid;place-items:center;transition:transform .12s} .smartbar .sopt:hover{transform:scale(1.08);box-shadow:inset 0 0 0 2px var(--accent)}
+.smartbar .sopt.real{font-size:11.5px;font-weight:700;color:var(--accent);background:linear-gradient(135deg,#EEF2FF,#FDF2F8)} .smartbar .sopt.wait{animation:spin 1.4s linear infinite}
+.smartbar .sopt img{max-width:50px;max-height:50px} .smartbar .skeep{font-size:12.5px;color:var(--ink2);padding:6px 8px;border-radius:8px} .smartbar .skeep:hover{background:var(--hover)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.help .field{width:100%;margin:4px 0 10px}
+.help-list{display:flex;flex-direction:column;gap:6px}
+.help-card{border-radius:12px;background:var(--hover);padding:2px 12px} .help-card summary{display:flex;align-items:center;gap:10px;padding:10px 0;font-weight:600;cursor:pointer;list-style:none} .help-card summary::-webkit-details-marker{display:none}
+.help-card .hic{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--sel);color:var(--accent)} .help-card .hic .ic{width:18px;height:18px}
+.help-card ul{margin:0 0 12px;padding-left:20px;color:var(--ink2);font-size:14px;line-height:1.5} .help-card[open]{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
 .stk{width:min(560px,94vw);height:min(720px,88vh);background:var(--panel);border-radius:18px;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--shadow)}
 .stk .dlg-head{display:grid;grid-template-columns:90px 1fr 90px;align-items:center;padding:10px 12px;text-align:center} .stk .dlg-head h3{margin:0;font-size:17px}
 .stk-hint{font-size:11px;color:var(--ink3);text-align:right}

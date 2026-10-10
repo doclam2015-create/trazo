@@ -85,7 +85,18 @@ const AI = (() => {
     }
     throw new Error('Para transcribir grabaciones ya hechas, configura OpenAI o Gemini en Ajustes › Inteligencia artificial. Durante la grabación, la transcripción en vivo es gratuita.');
   }
-  return { PROVIDERS, provider, available, ask, transcribe, keys };
+  // boceto → ilustración realista (OpenAI Images, solo con clave propia)
+  async function sketchToImage(dataURL, what) {
+    const key = keys().openai; if (!key) throw new Error('Requiere clave de OpenAI en Ajustes › Inteligencia artificial');
+    const fd = new FormData();
+    fd.append('model', 'gpt-image-1-mini'); fd.append('image', await (await fetch(dataURL)).blob(), 'boceto.png');
+    fd.append('prompt', `Convierte este boceto a mano en una ilustración realista, detallada y profesional de ${what}. Mantén exactamente la composición, orientación, proporciones y encuadre del boceto. Fondo transparente, sin texto.`);
+    fd.append('background', 'transparent'); fd.append('size', 'auto'); fd.append('quality', 'medium');
+    const r = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
+    const j = await r.json(); if (!r.ok) throw new Error((j.error && j.error.message) || 'Error ' + r.status);
+    return (await fetch('data:image/png;base64,' + j.data[0].b64_json)).blob();
+  }
+  return { PROVIDERS, provider, available, ask, transcribe, keys, sketchToImage };
 })();
 
 // ---------- procesamiento local (sin IA) ----------
