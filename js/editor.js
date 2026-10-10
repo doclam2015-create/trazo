@@ -344,7 +344,7 @@ const Editor = (() => {
     else scroller.scrollTo({ top: el.offsetTop - 16, behavior: smooth ? 'smooth' : 'auto' });
   }
   let scrollT;
-  function onScroll() { cancelAnimationFrame(scrollT); scrollT = requestAnimationFrame(() => { updateInd(); if (sel) drawSel(); posTextarea(); }); }
+  function onScroll() { cancelAnimationFrame(scrollT); scrollT = requestAnimationFrame(() => { updateInd(); if (sel) drawSel(); posTextarea(); if (smartBar && smartBar._at) posSmart(smartBar, ...smartBar._at); }); }
   function updateInd() {
     const pn = $('.pageind .pn', root); if (!pn) return;
     const c = currentPage() + 1, n = note.pages.length;
@@ -728,7 +728,8 @@ const Editor = (() => {
   // ---------- auto-dibujo: la IA reconoce bocetos (árbol, auto, persona…) y propone una versión limpia ----------
   let smart = null, smartBar = null;
   function smartQueue(pi, it) {
-    if (shapeMode() !== 'smart' || (it.t === 's' && it.k === 'marker') || !AI.available()) return;
+    if (shapeMode() !== 'smart' || (it.t === 's' && it.k === 'marker')) return;
+    if (!AI.available()) { if (!smartQueue.warned) { smartQueue.warned = true; toast('Dibujos con IA: falta tu clave en Ajustes › Inteligencia artificial'); } return; }
     const b = Items.bbox(it);
     if (smart && (smart.pi !== pi || !near(smart.box, b))) smart = null;
     if (!smart) smart = { pi, ids: [], box: b };
@@ -737,7 +738,7 @@ const Editor = (() => {
     smart.t = setTimeout(() => { if (smart === cur) { smart = null; smartRun(cur.pi, cur.ids); } }, cur.ids.length > 1 ? 1700 : 900);
   }
   const near = (a, b) => b.x < a.x + a.w + 140 && b.x + b.w > a.x - 140 && b.y < a.y + a.h + 140 && b.y + b.h > a.y - 140;
-  function smartHold() { if (smart) clearTimeout(smart.t); closeSmartBar(); }
+  function smartHold() { if (smart) clearTimeout(smart.t); }
   function closeSmartBar() { if (smartBar) { smartBar.remove(); smartBar = null; } }
   function cleanSVG(txt, color) {
     const m = String(txt || '').match(/<svg[\s\S]*<\/svg>/i); if (!m) return null;
@@ -768,44 +769,53 @@ const Editor = (() => {
     const k = 512 / Math.max(b.w, b.h), c = document.createElement('canvas'); c.width = Math.max(64, Math.round(b.w * k)); c.height = Math.max(64, Math.round(b.h * k));
     const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.setTransform(k, 0, 0, k, -b.x * k, -b.y * k);
     Items.drawAll(x, items.map(i => Object.assign({}, i, { c: '#000', fl: i.fl ? '#888' : '' })));
-    const W = 400, H = Math.round(400 * b.h / b.w), color = items[0].c || '#1C1C1E';
-    const pill = h('div', { class: 'smartbar busy' }, h('span', { html: icon('sparkle') }), 'Interpretando dibujo…');
-    if (manual) { root.append(pill); posSmart(pill, pi, b); }
+    const img = c.toDataURL('image/png'), W = 400, H = Math.round(400 * b.h / b.w), color = items[0].c || '#1C1C1E';
+    const stale = () => ids.some(id => !page.items.some(i => i.id === id));
+    closeSmartBar();
+    const pill = h('div', { class: 'smartbar busy' }, h('span', { html: icon('sparkle') }), 'Interpretando dibujo…', h('button', { class: 'skeep', onclick: () => { pill.remove(); pill.cancel = true; } }, 'Cancelar'));
+    root.append(pill); posSmart(pill, pi, b);
+    // 1) reconocimiento rápido
     let r;
-    try {
-      r = await AI.ask(`La imagen es un boceto a mano alzada hecho en una nota. Si representa algo reconocible (objeto, animal, persona, vehículo, planta, edificio, comida, órgano o instrumento médico, símbolo…) y NO es texto manuscrito ni un garabato sin sentido, identifícalo y redibújalo como lo haría un ilustrador profesional: anatomía y proporciones reales, formas naturales, detalles y textura (corteza, hojas, pliegues, reflejos, ruedas con llantas, rasgos faciales, etc.). Nada de estilo infantil ni figuras de palitos.
-Responde JSON: {"obj": "nombre corto en español" o null, "emoji": ["hasta 3 emojis parecidos"], "linea": "<svg…>", "color": "<svg…>"}.
-- "linea": ilustración a tinta detallada (estilo grabado o lámina de libro): contornos con grosores variados (1–4), sombreado con tramado o trazos paralelos, muchos detalles; stroke="#000", fill="none" salvo zonas de sombra sólidas en "#000".
-- "color": la misma ilustración a todo color, realista, con degradados (linearGradient/radialGradient en <defs>), luces y sombras, colores naturales.
-Ambos SVG: viewBox="0 0 ${W} ${H}", conserva la composición, orientación, tamaño relativo y encuadre del boceto; usa solo g, path, circle, ellipse, rect, line, polyline, polygon, defs, linearGradient, radialGradient y stop; atributos de presentación (fill, stroke, stroke-width, opacity, stop-color, offset), sin atributo style, sin texto, sin imágenes, sin scripts. Usa entre 40 y 250 elementos.`, { image: c.toDataURL('image/png'), json: true });
-    } catch (e) { pill.remove(); if (manual) toast('No se pudo interpretar: ' + e.message); return; }
+    try { r = await AI.ask('La imagen es un boceto a mano alzada. Si representa algo reconocible (objeto, animal, persona, vehículo, planta, edificio, comida, órgano o instrumento médico, símbolo…) y NO es texto manuscrito ni un garabato sin sentido, dime qué es. Responde JSON: {"obj": "nombre corto en español" o null, "emoji": ["hasta 2 emojis parecidos"], "desc": "descripción breve de la pose, vista y partes visibles"}', { image: img, json: true }); }
+    catch (e) { pill.remove(); toast('IA: ' + e.message); return; }
+    if (pill.cancel) return;
     pill.remove();
     if (!r || !r.obj) { if (manual) toast('No reconocí un objeto en el dibujo'); return; }
-    if (ids.some(id => !page.items.some(i => i.id === id))) return; // el dibujo cambió mientras tanto
-    const opts = [];
-    for (const [k, col, t] of [['linea', color, 'Ilustración a tinta'], ['color', null, 'Ilustración a color'], ['svg', color, 'Versión limpia']]) {
-      const svg = r[k] && cleanSVG(r[k], col || '#000'); if (!svg) continue;
-      try { const blob = await svgToBlob(svg, b.w, b.h); opts.push({ blob, url: URL.createObjectURL(blob), t }); } catch (e) {}
-    }
-    for (const em of (r.emoji || []).slice(0, 2)) { const cv = Stickers.render({ k: 'e', v: em }, 240), blob = await UI.canvasBlob(cv, 'image/png'); opts.push({ blob, url: URL.createObjectURL(blob), emoji: true }); }
-    if (!opts.length) return;
-    closeSmartBar();
+    if (stale()) return;
     const replace = async o => {
       closeSmartBar(); const id = await Blobs.put(o.blob);
       let w = b.w, hh = b.h; if (o.emoji) { w = hh = Math.max(b.w, b.h); }
       snap(pi); page.items = page.items.filter(i => !ids.includes(i.id));
       page.items.push({ t: 'i', id: uid(), b: id, x: b.x + (b.w - w) / 2, y: b.y + (b.h - hh) / 2, w, h: hh }); paintInk(pi); markDirty(); thumbsDirty(pi);
     };
-    smartBar = h('div', { class: 'smartbar' }, h('span', { class: 'sq' }, '¿' + r.obj.charAt(0).toUpperCase() + r.obj.slice(1) + '?'),
-      ...opts.map(o => h('button', { class: 'sopt' + (o.emoji ? ' emo' : ''), title: o.t || 'Usar emoji', onclick: () => replace(o) }, h('img', { src: o.url }))),
+    const tile = (t, o) => { const el = h('button', { class: 'sopt' + (o ? '' : ' wait'), title: t }); if (o) { el.append(h('img', { src: o.url })); el.onclick = () => replace(o); } else el.innerHTML = icon('sparkle'); return el; };
+    const tInk = tile('Ilustración a tinta (preparando…)'), tCol = tile('Ilustración a color (preparando…)');
+    const emos = [];
+    for (const em of (r.emoji || []).slice(0, 2)) { const blob = await UI.canvasBlob(Stickers.render({ k: 'e', v: em }, 240), 'image/png'); emos.push(Object.assign(tile('Usar emoji', { blob, url: URL.createObjectURL(blob), emoji: true }), {})); }
+    const bar = smartBar = h('div', { class: 'smartbar' }, h('span', { class: 'sq' }, '¿' + r.obj.charAt(0).toUpperCase() + r.obj.slice(1) + '?'), tInk, tCol, ...emos,
       AI.keys().openai ? h('button', { class: 'sopt real', title: 'Ilustración realista (OpenAI)', onclick: async e => {
         const btn = e.currentTarget; btn.classList.add('wait'); btn.textContent = '…';
-        try { const blob = await AI.sketchToImage(c.toDataURL('image/png'), r.obj); replace({ blob }); }
-        catch (x) { btn.classList.remove('wait'); btn.textContent = 'Realista'; toast(x.message); }
+        try { replace({ blob: await AI.sketchToImage(img, r.obj) }); } catch (x) { btn.classList.remove('wait'); btn.textContent = 'Realista'; toast(x.message); }
       } }, 'Realista') : null,
       h('button', { class: 'skeep', onclick: closeSmartBar }, 'Mantener'));
-    root.append(smartBar); posSmart(smartBar, pi, b);
-    clearTimeout(closeSmartBar.t); closeSmartBar.t = setTimeout(() => { if (smartBar && !smartBar.matches(':hover')) closeSmartBar(); }, 15000);
+    bar._at = [pi, b]; root.append(bar); posSmart(bar, pi, b);
+    // 2) ilustraciones detalladas
+    let d;
+    try {
+      d = await AI.ask(`El boceto de la imagen es: ${r.obj} (${r.desc || ''}). Redibújalo como lo haría un ilustrador profesional: anatomía y proporciones reales, formas naturales, detalles y textura (corteza, hojas, pliegues, reflejos, ruedas con llantas, rasgos faciales, etc.). Nada de estilo infantil ni figuras de palitos.
+Responde JSON: {"linea": "<svg…>", "color": "<svg…>"}.
+- "linea": ilustración a tinta detallada (estilo grabado o lámina de libro): contornos con grosores variados (1–4), sombreado con tramado o trazos paralelos, muchos detalles; stroke="#000", fill="none" salvo zonas de sombra sólidas en "#000".
+- "color": la misma ilustración a todo color, realista, con degradados (linearGradient/radialGradient en <defs>), luces y sombras, colores naturales.
+Ambos SVG: viewBox="0 0 ${W} ${H}", conserva la composición, orientación, tamaño relativo y encuadre del boceto; usa solo g, path, circle, ellipse, rect, line, polyline, polygon, defs, linearGradient, radialGradient y stop; atributos de presentación (fill, stroke, stroke-width, opacity, stop-color, offset), sin atributo style, sin texto, sin imágenes, sin scripts. Usa entre 40 y 250 elementos.`, { image: img, json: true });
+    } catch (e) { if (smartBar === bar) { tInk.remove(); tCol.remove(); toast('IA: ' + e.message); } return; }
+    if (smartBar !== bar) return;
+    for (const [key, col, el, t] of [['linea', color, tInk, 'Ilustración a tinta'], ['color', null, tCol, 'Ilustración a color']]) {
+      const svg = d && d[key] && cleanSVG(d[key], col || '#000');
+      if (!svg) { el.remove(); continue; }
+      try { const blob = await svgToBlob(svg, b.w, b.h); const o = { blob, url: URL.createObjectURL(blob) }; el.classList.remove('wait'); el.title = t; el.innerHTML = ''; el.append(h('img', { src: o.url })); el.onclick = () => replace(o); }
+      catch (e) { el.remove(); }
+    }
+    posSmart(bar, pi, b);
   }
   function posSmart(el, pi, b) {
     const r = pageEls[pi].getBoundingClientRect(), w = el.offsetWidth;

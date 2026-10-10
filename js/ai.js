@@ -50,7 +50,7 @@ const AI = (() => {
       const content = [{ type: 'text', text: prompt + (json ? '\n\nResponde SOLO con JSON válido.' : '') }];
       if (image) content.unshift({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.split(',')[1] } });
       res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model, max_tokens: 4096, system: sys, messages: [{ role: 'user', content }] }) });
+        body: JSON.stringify({ model, max_tokens: 16000, system: sys, messages: [{ role: 'user', content }] }) });
       const d = await res.json(); if (!res.ok) throw new Error(d.error && d.error.message || res.statusText);
       out = d.content.map(c => c.text || '').join('');
     }
