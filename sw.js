@@ -1,5 +1,5 @@
 // Trazo: funciona sin conexión. Archivos propios desde caché, actualizados en segundo plano.
-var CACHE = 'trazo-v3';
+var CACHE = 'trazo-v4';
 var FILES = ['./', 'index.html', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png',
   'js/core.js', 'js/render.js', 'js/shapes.js', 'js/stickers.js', 'js/editor.js', 'js/ai.js', 'js/tools.js', 'js/app.js',
   'lib/pdf.min.js', 'lib/pdf.worker.min.js', 'lib/pdf-lib.min.js', 'lib/jszip.min.js'];
