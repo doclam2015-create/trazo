@@ -544,7 +544,7 @@ const App = (() => {
           S.pin ? row('Bloquear al salir de la app', toggle('lockOnLeave')) : null),
           note('El código protege la app en este dispositivo. Tus notas no salen del equipo salvo cuando tú exportas, haces copias o usas IA.'));
       } else if (k === 'about') {
-        P(h('div', { class: 'plan' }, h('div', { class: 'logo', html: icon('logo') }), h('h2', {}, 'Trazo'), h('p', {}, 'Notas a mano, PDF y audio para iPad, iPhone y Mac.'), h('p', { class: 'muted' }, 'Hecho para el Dr. Marcelo Lam · 2026'), h('p', { class: 'muted small' }, 'Usa pdf.js (Mozilla), pdf-lib y JSZip, de código abierto.')));
+        P(h('div', { class: 'plan' }, h('div', { class: 'logo', html: icon('logo') }), h('h2', {}, 'Trazo'), h('p', {}, 'Notas a mano, PDF y audio para iPad, iPhone y Mac.'), h('p', { class: 'muted' }, 'Hecho para el Dr. Marcelo Lam · 2026'), h('p', { class: 'muted small' }, 'Versión 1.5 · figuras, dibujos con IA y ayuda'), h('p', { class: 'muted small' }, 'Usa pdf.js (Mozilla), pdf-lib y JSZip, de código abierto.')));
       } else if (k === 'help') {
         L.close(); help(); return;
         const keys = [['P', 'Bolígrafo'], ['L', 'Lápiz'], ['H', 'Marcador'], ['E', 'Borrador'], ['T', 'Texto'], ['S', 'Seleccionar'], ['K', 'Cinta'], ['R', 'Regla'], ['F', 'Figuras'], ['X', 'Láser'], ['Espacio', 'Navegar'], ['⌘Z / ⇧⌘Z', 'Deshacer / rehacer'], ['⌘C ⌘X ⌘V ⌘D', 'Copiar, cortar, pegar, duplicar'], ['⌘+ / ⌘− / ⌘0', 'Zoom'], ['Supr', 'Eliminar selección']];
@@ -613,7 +613,12 @@ const App = (() => {
       const m = metas.find(x => x.id === n.id); m.thumb = await makeThumb(n); await DB.put('meta', m);
       render();
     }
-    if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      // al instalarse una versión nueva, recarga una sola vez para usarla
+      const had = !!navigator.serviceWorker.controller; let done = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !done && !Editor.isOpen()) { done = true; location.reload(); } });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+    }
   }
 
   return { help, start, go, render, refresh, newNote, createNote, openNote, importPick, templatePicker, savePageAsTemplate, settings, noteInfo, nativeOpen, get view() { return view; } };
