@@ -66,7 +66,7 @@ const Settings = (() => {
   const defaults = {
     theme: 'auto', accent: '#3F66F0', name: '', titleFormat: 'Nota {fecha} {hora}',
     paper: { tpl: 'blank', color: '#FFFFFF' }, size: 'letter', view: 'continuous',
-    pencilOnly: 'auto', smoothing: 0.5, pressure: true, shapes: true, holdShapes: true,
+    pencilOnly: 'auto', smoothing: 0.5, pressure: true, shapes: true, holdShapes: true, shapeMode: 'hold', orient: 'portrait', scrollDir: 'v', textItalic: false, textUnder: false,
     textFont: 'system', textSize: 18, mediaCorners: 'square', autoPage: true,
     showHomeRecent: true, showHomePuzzle: true, notesView: 'grid', sort: 'updated',
     pin: '', lockOnLeave: false, lang: 'es-CL', summaryLen: 4, twoFingerUndo: true,
@@ -92,7 +92,7 @@ const UI = (() => {
       if (k === 'html') e.innerHTML = v;
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
       else if (k === 'class') e.className = v;
-      else if (k === 'style' && typeof v === 'object') Object.assign(e.style, v);
+      else if (k === 'style' && typeof v === 'object') for (const [sk, sv] of Object.entries(v)) sk.startsWith('--') ? e.style.setProperty(sk, sv) : (e.style[sk] = sv);
       else if (v !== false && v != null) e.setAttribute(k, v);
     }
     for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
@@ -216,6 +216,13 @@ function applyTheme() {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   document.documentElement.style.setProperty('--accent', Settings.accent);
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = dark ? '#151517' : '#F6F6F8';
+}
+const themeIcon = () => ({ light: 'sun', dark: 'moon' })[Settings.theme] || 'theme-auto';
+function cycleTheme(btn) {
+  const o = ['auto', 'light', 'dark'], n = o[(o.indexOf(Settings.theme) + 1) % 3];
+  Settings.theme = n; Settings.save(); applyTheme();
+  if (btn) btn.innerHTML = UI.icon(themeIcon());
+  UI.toast({ auto: 'Automático: sigue al sistema', light: 'Modo día', dark: 'Modo noche' }[n]);
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 applyTheme();

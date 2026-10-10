@@ -18,11 +18,11 @@ const App = (() => {
     const d = new Date(), p = n => String(n).padStart(2, '0');
     return (Settings.titleFormat || 'Nota {fecha} {hora}').replace('{fecha}', `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`).replace('{hora}', `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`);
   }
-  async function createNote({ title, folder, paper, pages, open = true, yt } = {}) {
+  async function createNote({ title, folder, paper, pages, open = true, yt, size, orient } = {}) {
     const id = uid(), now = Date.now();
     paper = paper || JSON.parse(JSON.stringify(Settings.paper));
     if (Paper.T[paper.tpl] && Paper.T[paper.tpl].param && !paper.p) paper.p = Paper.T[paper.tpl].param();
-    const [w, hh] = SIZES[Settings.size] || SIZES.letter;
+    const [w, hh] = pageSize(size, orient);
     const note = { id, title: title || titleNow(), created: now, updated: now, paper, pages: pages || [{ id: uid(), w, h: hh, paper: JSON.parse(JSON.stringify(paper)), items: [] }], recs: [] };
     if (yt) note.yt = yt;
     const meta = { id, title: note.title, folder: folder || (view.startsWith('folder:') ? view.slice(7) : null), fav: false, created: now, updated: now, opened: now, deleted: null, pages: note.pages.length, thumb: '' };
@@ -78,6 +78,7 @@ const App = (() => {
     t.append(
       h('button', { class: 'ib menu-btn', title: 'Menú', onclick: () => document.body.classList.toggle('drawer'), html: icon('menu') }),
       h('div', { class: 'grow' }),
+      h('button', { class: 'ib', title: 'Modo día / noche / automático', onclick: e => cycleTheme(e.currentTarget), html: icon(themeIcon()) }),
       h('button', { class: 'ib', title: 'Novedades', onclick: e => news(e.currentTarget), html: icon('bell') }),
       h('button', { class: 'ib', title: 'Más', onclick: e => topMore(e.currentTarget), html: icon('more') }),
       h('button', { class: 'btn primary new', onclick: e => newMenu(e.currentTarget) }, h('span', { html: icon('plus') }), 'Nueva'));
@@ -200,10 +201,10 @@ const App = (() => {
   }
 
   // ---------- galería de plantillas ----------
-  const tplCanvas = (t, w = 200) => {
-    const p = SIZES.letter, c = h('canvas', { width: w * 2, height: Math.round(w * 2 * p[1] / p[0]) });
+  const tplCanvas = (t, w = 200, o = {}) => {
+    const p = o.size || SIZES.letter, c = h('canvas', { width: w * 2, height: Math.round(w * 2 * p[1] / p[0]) });
     const x = c.getContext('2d'), k = c.width / p[0]; x.scale(k, k);
-    Paper.draw(x, p[0], p[1], { tpl: t.id, color: '#FFFFFF', p: t.param ? t.param() : undefined });
+    Paper.draw(x, p[0], p[1], { tpl: t.id, color: o.color || '#FFFFFF', sp: o.sp, p: t.param ? t.param() : undefined });
     return c;
   };
   async function gallery(c) {
@@ -241,13 +242,30 @@ const App = (() => {
   }
   // selector de plantillas reutilizable (editor)
   function templatePicker(cb) {
-    const grid = h('div', { class: 'ggrid compact' });
-    const L = UI.layer(h('div', { class: 'dlg wide' }, h('div', { class: 'dlg-head' }, h('button', { class: 'link', onclick: () => L.close() }, 'Cancelar'), h('h3', {}, 'Plantillas'), h('span')), grid), { cls: 'center' });
+    const grid = h('div', { class: 'ggrid compact' }), jump = h('div', { class: 'tpl-jump' }, h('span', { class: 'muted' }, 'Ir a:'));
+    const o = { size: Settings.size || 'letter', orient: Settings.orient || 'portrait', color: (Settings.paper && Settings.paper.color) || '#FFFFFF', sp: 4 };
+    const opts = h('div', { class: 'tpl-opts' });
+    const L = UI.layer(h('div', { class: 'dlg wide' }, h('div', { class: 'dlg-head' }, h('button', { class: 'link', onclick: () => L.close() }, 'Cancelar'), h('h3', {}, 'Plantillas'), h('span')), opts, jump, grid), { cls: 'center' });
+    const spOf = () => 1 + (o.sp - 4) * 0.15;
+    const pick = t => { L.close(); cb({ id: t.id, param: t.param ? t.param() : undefined, color: o.color, sp: t.sp ? spOf() : undefined, size: o.size, orient: o.orient }); };
+    const drawOpts = () => {
+      opts.innerHTML = '';
+      opts.append(h('label', { class: 'muted' }, 'Tamaño'), h('select', { class: 'sel', onchange: e => { o.size = e.target.value; fill(); } }, ...Object.keys(SIZES).map(k => h('option', { value: k, selected: o.size === k ? '' : false }, SIZE_NAMES[k]))),
+        h('div', { class: 'seg' }, ...[['portrait', 'Vertical'], ['landscape', 'Horizontal']].map(([v, n]) => h('button', { class: o.orient === v ? 'on' : '', title: n, onclick: () => { o.orient = v; drawOpts(); fill(); } }, h('i', { class: 'or ' + v }), n))),
+        h('div', { class: 'swrow' }, ...PAPER_COLORS.map(pc => h('button', { class: 'sw' + (o.color === pc.c ? ' on' : ''), title: pc.n, style: { '--c': pc.c }, onclick: () => { o.color = pc.c; drawOpts(); fill(); } }))),
+        h('label', { class: 'muted' }, 'Espaciado ', h('b', {}, String(o.sp))), h('input', { type: 'range', class: 'rng', min: 1, max: 9, step: 1, value: o.sp, oninput: e => { o.sp = +e.target.value; opts.querySelector('b').textContent = o.sp; }, onchange: () => fill() }));
+    };
+    const fill = () => { grid.innerHTML = ''; jump.querySelectorAll('button').forEach(b => b.remove()); build(); };
+    const build = () => {
     for (const cat of [...Paper.CATS, 'Mías']) {
       const items = Object.values(Paper.T).filter(t => cat === 'Mías' ? t.mine : t.cat === cat && !t.mine); if (!items.length) continue;
-      grid.append(h('h4', { class: 'full' }, cat));
-      items.forEach(t => grid.append(h('button', { class: 'tpl-mini', onclick: () => { L.close(); cb({ id: t.id, param: t.param ? t.param() : undefined }); } }, tplCanvas(t, 110), h('span', {}, t.name))));
+      const hd = h('h4', { class: 'full' }, cat);
+      jump.append(h('button', { class: 'chip sm', onclick: () => hd.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, cat));
+      grid.append(hd);
+      items.forEach(t => grid.append(h('button', { class: 'tpl-mini' + (o.orient === 'landscape' ? ' land' : ''), onclick: () => pick(t) }, tplCanvas(t, 110, { color: o.color, sp: t.sp ? spOf() : 1, size: pageSize(o.size, o.orient) }), h('span', {}, t.name))));
     }
+    };
+    drawOpts(); build();
   }
   async function savePageAsTemplate(page) {
     const name = await UI.prompt('Nombre de la plantilla', 'Mi plantilla'); if (!name) return;
@@ -292,7 +310,7 @@ const App = (() => {
   function newMenu(btn) {
     menu(btn, [
       { t: 'Nota nueva', i: 'notes', fn: newNote },
-      { t: 'Desde una plantilla…', i: 'template', fn: () => templatePicker(t => createNote({ paper: { tpl: t.id, color: '#FFFFFF', p: t.param } })) },
+      { t: 'Desde una plantilla…', i: 'template', fn: () => templatePicker(t => createNote({ paper: { tpl: t.id, color: t.color, p: t.param, sp: t.sp }, size: t.size, orient: t.orient })) },
       { t: 'Importar PDF, imágenes o nota', i: 'import', fn: importPick },
       { t: 'Escanear documento', i: 'scan', fn: async () => { const pages = await Importer.scan(); if (pages && pages.length) createNote({ title: 'Escaneo ' + UI.date(Date.now()), pages }); } },
       { t: 'Empezar a grabar', i: 'mic', fn: async () => { await createNote(); setTimeout(() => Editor.startRec(), 400); } },
@@ -459,7 +477,7 @@ const App = (() => {
             row('Transcripción en vivo', h('b', {}, (window.SpeechRecognition || window.webkitSpeechRecognition) ? 'Disponible (gratis)' : 'No disponible aquí'))),
           group('Prueba', row('Probar conexión', h('button', { class: 'chip', onclick: async () => { const b = UI.busy('Consultando…'); try { const r = await AI.ask('Responde solo: "Conexión correcta".'); UI.alert('IA conectada', r); } catch (e) { UI.alert('Error', e.message); } finally { b.done(); } } }, 'Probar'))));
       } else if (k === 'look') {
-        P(group('Tema', row('Apariencia', select('theme', [['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], applyTheme)),
+        P(group('Tema', row('Apariencia', select('theme', [['auto', 'Automático (según el sistema)'], ['light', 'Día'], ['dark', 'Noche']], () => { applyTheme(); renderTop(); })),
           row('Color de acento', h('div', { class: 'swrow' }, ...['#3F66F0', '#7950F2', '#0B7A75', '#E8590C', '#E64980', '#2B2D42'].map(c => h('button', { class: 'sw' + (S.accent === c ? ' on' : ''), style: { '--c': c }, onclick: () => { S.accent = c; S.save(); applyTheme(); show('look'); } }))))),
           group('Biblioteca', row('Vista de notas', select('notesView', [['grid', 'Cuadrícula'], ['list', 'Lista']])), row('Confirmar antes de eliminar', h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: S.confirmDelete !== false ? '' : false, onchange: e => { S.confirmDelete = e.target.checked; S.save(); } }), h('i')))));
       } else if (k === 'editor') {
@@ -472,7 +490,7 @@ const App = (() => {
           group('Texto', row('Fuente', select('textFont', [['system', 'Sistema'], ['serif', 'Serif'], ['round', 'Redondeada'], ['mono', 'Monoespaciada'], ['hand', 'Manuscrita']])),
             row('Tamaño', h('input', { class: 'field xs', type: 'number', min: 10, max: 72, value: S.textSize, onchange: e => { S.textSize = +e.target.value || 18; S.save(); } }))),
           group('Escritura a mano y dibujo', row('Suavizado del trazo', h('input', { type: 'range', class: 'rng', min: 0, max: 1, step: 0.05, value: S.smoothing, onchange: e => { S.smoothing = +e.target.value; S.save(); } })),
-            row('Sensibilidad a la presión', toggle('pressure')), row('Figuras al mantener el trazo', toggle('shapes')), row('Página nueva automática al llegar al final', toggle('autoPage'))),
+            row('Sensibilidad a la presión', toggle('pressure')), row('Figuras perfectas', select('shapeMode', [['off', 'Garabato libre'], ['hold', 'Al mantener el trazo'], ['auto', 'Automático al soltar']])), row('Página nueva automática al llegar al final', toggle('autoPage'))),
           group('Multimedia', row('Esquinas de imágenes', select('mediaCorners', [['square', 'Puntiagudas'], ['round', 'Redondeadas']]))));
       } else if (k === 'pencil') {
         P(group('Apple Pencil', row('Escribir con', select('pencilOnly', [['auto', 'Automático (al detectar el Pencil)'], ['on', 'Solo Apple Pencil'], ['off', 'Pencil y dedo']]), 'Con «Solo Apple Pencil», el dedo desplaza, hace zoom y toca cintas'),
