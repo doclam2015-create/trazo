@@ -121,7 +121,7 @@ const Exporter = (() => {
     for (const i of list) { const p = note.pages[i], c = document.createElement('canvas'), sc = 2; c.width = p.w * sc; c.height = p.h * sc; await renderPageTo(c.getContext('2d'), p, sc); blobs.push(await UI.canvasBlob(c)); }
     b.done();
     if (blobs.length === 1) return UI.saveBlob(blobs[0], safe(note.title) + '.png');
-    if (!UI.native && navigator.canShare) {
+    if (!UI.mac && navigator.canShare) {
       const files = blobs.map((bb, k) => new File([bb], `${safe(note.title)} ${k + 1}.png`, { type: 'image/png' }));
       if (navigator.canShare({ files })) { try { await navigator.share({ files }); return; } catch (e) { if (e.name === 'AbortError') return; } }
     }

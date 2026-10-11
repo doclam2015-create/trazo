@@ -16,8 +16,8 @@ const AI = (() => {
   const keys = () => (Settings.aiKeys = Settings.aiKeys || {});
   function provider() {
     let p = Settings.aiProvider;
-    if (!p) p = UI.native ? 'codex' : (Object.keys(keys()).find(k => keys()[k]) || 'local');
-    if (PROVIDERS[p] && PROVIDERS[p].mac && !UI.native) p = Object.keys(keys()).find(k => keys()[k]) || 'local';
+    if (!p) p = UI.mac ? 'codex' : (Object.keys(keys()).find(k => keys()[k]) || 'local');
+    if (PROVIDERS[p] && PROVIDERS[p].mac && !UI.mac) p = Object.keys(keys()).find(k => keys()[k]) || 'local';
     return p;
   }
   const available = () => { const p = provider(); return p !== 'local' && (PROVIDERS[p].mac || !!keys()[p]); };

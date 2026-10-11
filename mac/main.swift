@@ -220,24 +220,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
-    // Transcripción pública de YouTube (si el video tiene subtítulos)
+    // Transcripción pública de YouTube (si el video tiene subtítulos), por la API interna con el cliente de iOS
     static func youtubeTranscript(_ id: String) -> String {
-        func get(_ s: String) -> Data? {
-            guard let u = URL(string: s) else { return nil }
-            var r = URLRequest(url: u); r.setValue("es-CL,es;q=0.9,en;q=0.5", forHTTPHeaderField: "Accept-Language")
-            r.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+        func send(_ r: URLRequest) -> Data? {
             let sem = DispatchSemaphore(value: 0); var out: Data?
             URLSession.shared.dataTask(with: r) { d, _, _ in out = d; sem.signal() }.resume()
             _ = sem.wait(timeout: .now() + 20); return out
         }
-        guard let d = get("https://www.youtube.com/watch?v=\(id)&hl=es"), let html = String(data: d, encoding: .utf8),
-              let r = html.range(of: "\"captionTracks\":") else { return "" }
-        let rest = html[r.upperBound...]
-        guard let end = rest.range(of: "],") else { return "" }
-        let arr = String(rest[rest.startIndex..<end.lowerBound]) + "]"
-        guard let j = try? JSONSerialization.jsonObject(with: Data(arr.utf8)) as? [[String: Any]], !j.isEmpty else { return "" }
-        let track = j.first(where: { ($0["languageCode"] as? String ?? "").hasPrefix("es") }) ?? j[0]
-        guard let base = track["baseUrl"] as? String, let cd = get(base + "&fmt=json3"),
+        var r = URLRequest(url: URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false")!)
+        r.httpMethod = "POST"
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue("com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3 like Mac OS X;)", forHTTPHeaderField: "User-Agent")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["videoId": id, "context": ["client": ["clientName": "IOS", "clientVersion": "20.10.4", "deviceModel": "iPhone16,2", "hl": "es"]]])
+        guard let d = send(r), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let tracks = ((j["captions"] as? [String: Any])?["playerCaptionsTracklistRenderer"] as? [String: Any])?["captionTracks"] as? [[String: Any]], !tracks.isEmpty else { return "" }
+        let track = tracks.first(where: { ($0["languageCode"] as? String ?? "").hasPrefix("es") }) ?? tracks[0]
+        guard let base = track["baseUrl"] as? String, let u = URL(string: base + "&fmt=json3"), let cd = send(URLRequest(url: u)),
               let cj = try? JSONSerialization.jsonObject(with: cd) as? [String: Any], let events = cj["events"] as? [[String: Any]] else { return "" }
         var out = ""
         for e in events { for s in (e["segs"] as? [[String: Any]] ?? []) { out += (s["utf8"] as? String ?? "") } ; out += " " }

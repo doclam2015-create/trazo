@@ -373,7 +373,7 @@ const App = (() => {
       ['Figuras perfectas', 'Dibuja un círculo o rectángulo y mantén el lápiz quieto medio segundo.'],
       ['Audio + tinta', 'Al reproducir una grabación, tu escritura aparece en el orden en que la hiciste. Toca un trazo para saltar a ese momento.'],
       ['Cinta para estudiar', 'Tapa respuestas con la cinta y tócala para revelarlas.'],
-      ['IA con tus cuentas', UI.native ? 'En el Mac, Trazo usa tu sesión de ChatGPT (Codex), Claude o Gemini, sin costo extra.' : 'Agrega una clave de OpenAI o Gemini (nivel gratuito) en Ajustes › Inteligencia artificial.'],
+      ['IA con tus cuentas', UI.mac ? 'En el Mac, Trazo usa tu sesión de ChatGPT (Codex), Claude o Gemini, sin costo extra.' : 'Agrega una clave de OpenAI o Gemini (nivel gratuito) en Ajustes › Inteligencia artificial.'],
       ['Gestos', 'Toca con dos dedos para deshacer. Pellizca para hacer zoom.'],
     ];
     menu(btn, tips.map(([t, s]) => ({ t, sub: s, i: 'sparkle' })), { align: 'right', cls: 'wide' });
@@ -500,16 +500,19 @@ const App = (() => {
         P(group('Copia de seguridad',
           row('Exportar copia completa', h('button', { class: 'chip', onclick: () => Backup.exportAll() }, 'Exportar'), 'Todas las notas, audios y carpetas en un archivo .trazobackup'),
           row('Restaurar o fusionar copia', h('button', { class: 'chip', onclick: async () => { const f = await UI.pickFiles('.trazobackup,application/zip,application/octet-stream', false); if (f[0]) { await Backup.restore(f[0]); await load(); } } }, 'Elegir archivo'), 'Conserva la versión más reciente de cada nota'),
-          UI.native ? row('Copia automática en iCloud Drive', toggle('autoBackup'), 'Cada 6 horas en iCloud Drive › Trazo') : null),
-          note(UI.native ? 'Para pasar tus notas al iPad: abre el archivo .trazobackup de iCloud Drive › Trazo desde la app Trazo del iPad (Nueva › Importar).' : 'Para llevar tus notas a otro equipo: exporta la copia (Archivos › iCloud Drive) y restáurala en el otro dispositivo. En el Mac, la copia automática queda en iCloud Drive › Trazo.'),
+          UI.mac ? row('Copia automática en iCloud Drive', toggle('autoBackup'), 'Cada 6 horas en iCloud Drive › Trazo') : null,
+          UI.native && !UI.mac ? row('Copia automática cada 6 horas', toggle('autoBackup'), h('span', { id: 'bkdir' }, '…')) : null,
+          UI.native && !UI.mac ? row('Carpeta de copias', h('button', { class: 'chip', onclick: async () => { const l = await UI.bridge({ op: 'backupDir' }); if (l) $('#bkdir').textContent = l; } }, 'Cambiar'), 'Elige iCloud Drive para tenerlas también en el Mac') : null),
+          note(UI.mac ? 'Para pasar tus notas al iPad: abre el archivo .trazobackup de iCloud Drive › Trazo desde la app Trazo del iPad (Nueva › Importar).' : 'Para llevar tus notas a otro equipo: exporta la copia (Archivos › iCloud Drive) y restáurala en el otro dispositivo. En el Mac, la copia automática queda en iCloud Drive › Trazo.'),
           group('Historial de versiones', row('Conservar versiones', select('versionDays', [[7, '7 días'], [30, '30 días'], [90, '90 días'], [365, '1 año']].map(([v, n]) => [String(v), n]), () => { S.versionDays = +S.versionDays; S.save(); }))));
+        if (UI.native && !UI.mac) UI.bridge({ op: 'backupLabel' }).then(l => { const e = $('#bkdir'); if (e) e.textContent = l; });
       } else if (k === 'ai') {
         const keys = AI.keys(), prov = AI.provider();
-        const opts = Object.entries(AI.PROVIDERS).filter(([id, p]) => UI.native || !p.mac).map(([id, p]) => [id, p.n]);
+        const opts = Object.entries(AI.PROVIDERS).filter(([id, p]) => UI.mac || !p.mac).map(([id, p]) => [id, p.n]);
         const keyRow = id => { const p = AI.PROVIDERS[id]; return h('div', { class: 'srow col' }, h('div', {}, h('span', {}, p.n), h('small', {}, p.help)),
           h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Pega tu clave aquí', value: keys[id] || '', onchange: e => { keys[id] = e.target.value.trim(); S.save(); show('ai'); } })); };
         P(group('Proveedor', row('Usar', h('select', { class: 'sel', onchange: e => { S.aiProvider = e.target.value; S.save(); show('ai'); } }, ...opts.map(([v, n]) => h('option', { value: v, selected: prov === v ? '' : false }, n))))),
-          note(UI.native ? 'En el Mac, Trazo usa las sesiones que ya tienes iniciadas en Codex (ChatGPT), Claude Code o Gemini CLI: sin claves y sin costo adicional.' : 'En iPad y iPhone, la IA funciona con tu clave API. Recomendado: OpenAI GPT‑5 mini (centavos al mes) o Gemini (uso gratuito diario). La clave se guarda solo en este dispositivo.'),
+          note(UI.mac ? 'En el Mac, Trazo usa las sesiones que ya tienes iniciadas en Codex (ChatGPT), Claude Code o Gemini CLI: sin claves y sin costo adicional.' : 'En iPad y iPhone, la IA funciona con tu clave API. Recomendado: OpenAI GPT‑5 mini (centavos al mes) o Gemini (uso gratuito diario). La clave se guarda solo en este dispositivo.'),
           AI.PROVIDERS[prov] && AI.PROVIDERS[prov].key ? group('Clave', keyRow(prov), row('Modelo', h('input', { class: 'field', value: (S.aiModels || {})[prov] || AI.PROVIDERS[prov].model, onchange: e => { S.aiModels = S.aiModels || {}; S.aiModels[prov] = e.target.value.trim(); S.save(); } }))) : null,
           group('Transcripción', row('Idioma', select('lang', [['es-CL', 'Español (Chile)'], ['es-ES', 'Español (España)'], ['es-MX', 'Español (México)'], ['en-US', 'Inglés'], ['pt-BR', 'Portugués']])),
             row('Transcripción en vivo', h('b', {}, (window.SpeechRecognition || window.webkitSpeechRecognition) ? 'Disponible (gratis)' : 'No disponible aquí'))),

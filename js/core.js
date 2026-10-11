@@ -183,6 +183,7 @@ const UI = (() => {
   const dur = s => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), h = Math.floor(m / 60); return (h ? h + ':' + String(m % 60).padStart(2, '0') : m) + ':' + String(s % 60).padStart(2, '0'); };
   const isPhone = () => Math.min(innerWidth, innerHeight) < 600;
   const native = !!(window.webkit && webkit.messageHandlers && webkit.messageHandlers.trazo);
+  const mac = native && !window.TRAZO_IOS; // en iPhone/iPad no hay Codex/Claude/Gemini CLI
   const bridge = msg => webkit.messageHandlers.trazo.postMessage(msg);
   const blobB64 = b => new Promise(r => { const f = new FileReader(); f.onload = () => r(String(f.result).split(',')[1]); f.readAsDataURL(b); });
   // guardar o compartir un archivo, según la plataforma
@@ -207,7 +208,7 @@ const UI = (() => {
   const canvasBlob = (c, type = 'image/png', q = 0.92) => new Promise(r => c.toBlob(r, type, q));
   // puntos de presión: pausa breve para no bloquear la interfaz
   const tick = () => new Promise(r => setTimeout(r, 0));
-  return { $, $$, esc, icon, h, toast, layer, dialog, alert, confirm, prompt, menu, busy, date, datetime, rel, dur, isPhone, native, bridge, blobB64, saveBlob, pickFiles, loadImage, canvasBlob, tick };
+  return { $, $$, esc, icon, h, toast, layer, dialog, alert, confirm, prompt, menu, busy, date, datetime, rel, dur, isPhone, native, mac, bridge, blobB64, saveBlob, pickFiles, loadImage, canvasBlob, tick };
 })();
 
 // Tema y color de acento
